@@ -108,12 +108,12 @@ class AnnotationDefinitions:
                 "No records are found in the annotation definition table"
                 f"that matches the specified pattern: {pattern}"
             )
-        if definition.shape[0] > 1:
-            raise DuplicateRecordError(
-                "Found more than one annodation definition that matches"
-                f"the pattern {pattern}. The matched records are: \n"
-                f"{definition}"
-            )
+        # if definition.shape[0] > 1:
+        #     raise DuplicateRecordError(
+        #         "Found more than one annodation definition that matches"
+        #         f"the pattern {pattern}. The matched records are: \n"
+        #         f"{definition}"
+        #     )
         definition = definition.to_dict("records")[0]
 
         return definition
