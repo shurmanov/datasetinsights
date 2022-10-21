@@ -177,7 +177,7 @@ class Captures:
             )
             raise DefinitionIDError(msg)
 
-        mask = self.annotations.annotation_definition == def_id
+        mask = self.annotations.annotation_definition.str.contains(def_id)
         annotations = (
             self.annotations[mask]
             .set_index("capture.id")
