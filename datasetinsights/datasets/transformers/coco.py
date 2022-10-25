@@ -274,7 +274,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
         self._kpt_captures = captures.filter(self._kpt_def["id"])
         if self._instance_segmentation_def:
             self._instance_segmentation_captures = captures.filter(
-                self._instance_segmentation_def
+                self._instance_segmentation_def["id"]
             )
 
     def execute(self, output, **kwargs):
