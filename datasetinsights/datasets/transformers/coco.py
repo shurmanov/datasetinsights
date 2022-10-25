@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def uuid_to_int(input_uuid):
     try:
-        u = uuid.UUID(input_uuid).int
+        u = int(str(uuid.UUID(input_uuid).int)[:9])
     except (AttributeError, ValueError):
         u = int(
             hashlib.md5(str(input_uuid).encode("utf8")).hexdigest(), base=16
