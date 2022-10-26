@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from pycocotools.mask import encode as mask_to_rle
+from pycocotools.mask import decode as decode_to_mask
+import cv2
 
 import datasetinsights.constants as const
 from datasetinsights.datasets.transformers.base import DatasetTransformer
@@ -249,6 +251,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
 
     def __init__(self, data_root):
         self._data_root = Path(data_root)
+        self._has_instance_seg = False
 
         ann_def = AnnotationDefinitions(
             data_root, version=const.DEFAULT_PERCEPTION_VERSION
@@ -259,6 +262,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             self._instance_segmentation_def = ann_def.find_by_name(
                 self.INSTANCE_SEGMENTATION_NAME
             )
+            self._has_instance_seg = True
         except NoRecordError as e:
             logger.warning(
                 "Can't find instance segmentation annotations in the dataset. "
@@ -330,22 +334,79 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
 
         return images
 
+    def _get_instance_seg_img(self, seg_row):
+        file_path = (
+            self._data_root / seg_row["annotation.filename"].to_list()[0]
+        )
+
+        with Image.open(file_path) as img:
+            w, h = img.size
+            if np.shape(img)[-1] == 4:
+                img = np.array(img.getdata(), dtype=np.uint8).reshape(h, w, 4)
+            else:
+                img = np.array(img.getdata(), dtype=np.uint8).reshape(h, w, 3)
+
+        return img
+
+    @staticmethod
+    def _compute_segmentation(instance_id, seg_instances, seg_img):
+        segmentation = []
+        for ins in seg_instances:
+            if instance_id == ins["instance_id"]:
+                ins_color = ins["color"]
+                if np.shape(seg_img)[-1] == 4:
+                    ins_color = (
+                        ins_color["r"],
+                        ins_color["g"],
+                        ins_color["b"],
+                        ins_color["a"],
+                    )
+                else:
+                    ins_color = (ins_color["r"], ins_color["g"], ins_color["b"])
+
+                ins_mask = (seg_img == ins_color).prod(axis=-1).astype(np.uint8)
+                segmentation = mask_to_rle(np.asfortranarray(ins_mask))
+                segmentation["counts"] = segmentation["counts"].decode()
+
+        mask = decode_to_mask(segmentation)
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        segs = []
+        for contour in contours:
+            # Valid polygons have >= 6 coordinates (3 points)
+            if contour.size >= 6:
+                segs.append(contour.flatten().tolist())
+
+        return segs
+
     def _annotations(self):
         annotations = []
         for [_, row_bb], [_, row_kpt] in zip(
             self._bbox_captures.iterrows(), self._kpt_captures.iterrows()
         ):
             image_id = uuid_to_int(row_bb["id"])
+            if self._has_instance_seg:
+                seg_row = self._instance_segmentation_captures.loc[
+                    self._instance_segmentation_captures["id"] == str(row_bb["id"])
+                ]
+                seg_instances = seg_row["annotation.values"].to_list()[0]
+                seg_img = self._get_instance_seg_img(seg_row)
 
             for ann_bb, ann_kpt in zip(
                 row_bb["annotation.values"], row_kpt["annotation.values"]
             ):
                 # --- bbox ---
+                instance_id = ann_bb["instance_id"]
                 x = ann_bb["x"]
                 y = ann_bb["y"]
                 w = ann_bb["width"]
                 h = ann_bb["height"]
                 area = float(w) * float(h)
+                if self._has_instance_seg:
+                    segmentation = self._compute_segmentation(
+                        instance_id, seg_instances, seg_img
+                    )
+                else:
+                    segmentation = []
 
                 # -- kpt ---
                 keypoints_vals = []
@@ -366,7 +427,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
                 ]
 
                 record = {
-                    "segmentation": [],  # TODO: parse instance segmentation map
+                    "segmentation": segmentation,
                     "area": area,
                     "iscrowd": 0,
                     "image_id": image_id,
