@@ -10,7 +10,7 @@ from PIL import Image
 from pycocotools.mask import encode as mask_to_rle
 from pycocotools.mask import decode as decode_to_mask
 import cv2
-
+from skimage import measure
 import datasetinsights.constants as const
 from datasetinsights.datasets.transformers.base import DatasetTransformer
 from datasetinsights.datasets.unity_perception import (
@@ -349,50 +349,68 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
         return img
 
     @staticmethod
-    def _compute_segmentation(instance_id, seg_instances, seg_img):
-        segmentation = []
-        for ins in seg_instances:
-            if instance_id == ins["instance_id"]:
-                ins_color = ins["color"]
-                if np.shape(seg_img)[-1] == 4:
-                    ins_color = (
-                        ins_color["r"],
-                        ins_color["g"],
-                        ins_color["b"],
-                        ins_color["a"],
-                    )
-                else:
-                    ins_color = (ins_color["r"], ins_color["g"], ins_color["b"])
-
-                ins_mask = (seg_img == ins_color).prod(axis=-1).astype(np.uint8)
-                segmentation = mask_to_rle(np.asfortranarray(ins_mask))
-                segmentation["counts"] = segmentation["counts"].decode()
-
-        mask = decode_to_mask(segmentation)
-        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        segs = []
+    def _binary_mask_to_polygon(binary_mask, tolerance=0):
+        """Converts a binary mask to COCO polygon representation
+        Args:
+            binary_mask: a 2D binary numpy array where '1's represent the object
+            tolerance: Maximum distance from original points of polygon to approximated
+                polygonal chain. If tolerance is 0, the original coordinate array is returned.
+        """
+        polygons = []
+        # pad mask to close contours of shapes which start and end at an edge
+        padded_binary_mask = np.pad(binary_mask, pad_width=1, mode='constant', constant_values=0)
+        contours = measure.find_contours(padded_binary_mask, 0.5)
+        contours = np.subtract(contours, 1)
         for contour in contours:
-            # Valid polygons have >= 6 coordinates (3 points)
-            if contour.size >= 6:
-                segs.append(contour.flatten().tolist())
+            # contour = close_contour(contour)
+            if not np.array_equal(contour[0], contour[-1]):
+                contour = np.vstack((contour, contour[0]))
+
+            contour = measure.approximate_polygon(contour, tolerance)
+            if len(contour) < 3:
+                continue
+            contour = np.flip(contour, axis=1)
+            segmentation = contour.ravel().tolist()
+            # after padding and subtracting 1 we may get -0.5 points in our segmentation
+            segmentation = [0 if i < 0 else i for i in segmentation]
+            polygons.append(segmentation)
+
+        return polygons
+
+    @staticmethod
+    def _compute_segmentation(seg_instance, seg_img):
+        seg_color = seg_instance["color"]
+        if np.shape(seg_img)[-1] == 4:
+            seg_color = (
+                seg_color["r"],
+                seg_color["g"],
+                seg_color["b"],
+                seg_color["a"],
+            )
+        else:
+            seg_color = (seg_color["r"], seg_color["g"], seg_color["b"])
+
+        ins_mask = (seg_img == seg_color).prod(axis=-1).astype(np.uint8)
+        segs = COCOKeypointsTransformer._binary_mask_to_polygon(ins_mask, tolerance=10)
 
         return segs
 
     def _annotations(self):
         annotations = []
-        for [_, row_bb], [_, row_kpt] in zip(
-            self._bbox_captures.iterrows(), self._kpt_captures.iterrows()
+        for [_, row_bb], [_, row_kpt], [_, row_seg] in zip(
+                self._bbox_captures.iterrows(),
+                self._kpt_captures.iterrows(),
+                self._instance_segmentation_captures.iterrows()
         ):
             image_id = uuid_to_int(row_bb["id"])
-            if self._has_instance_seg:
-                seg_row = self._instance_segmentation_captures.loc[
-                    self._instance_segmentation_captures["id"] == str(row_bb["id"])
-                ]
-                seg_instances = seg_row["annotation.values"].to_list()[0]
-                seg_img = self._get_instance_seg_img(seg_row)
+            # seg_row = self._instance_segmentation_captures.loc[
+            #     self._instance_segmentation_captures["id"] == str(row_bb["id"])
+            # ]
+            # seg_instances = seg_row["annotation.values"].to_list()[0]
+            seg_img = self._get_instance_seg_img(row_seg)
 
-            for ann_bb, ann_kpt in zip(
-                row_bb["annotation.values"], row_kpt["annotation.values"]
+            for ann_bb, ann_kpt, ann_seg in zip(
+                row_bb["annotation.values"], row_kpt["annotation.values"], row_seg["annotation.values"]
             ):
                 # --- bbox ---
                 instance_id = ann_bb["instance_id"]
@@ -401,12 +419,9 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
                 w = ann_bb["width"]
                 h = ann_bb["height"]
                 area = float(w) * float(h)
-                if self._has_instance_seg:
-                    segmentation = self._compute_segmentation(
-                        instance_id, seg_instances, seg_img
-                    )
-                else:
-                    segmentation = []
+                segmentation = self._compute_segmentation(
+                    ann_seg, seg_img
+                )
 
                 # -- kpt ---
                 keypoints_vals = []
