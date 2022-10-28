@@ -336,7 +336,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
 
     def _get_instance_seg_img(self, seg_row):
         file_path = (
-            self._data_root / seg_row["annotation.filename"].to_list()[0]
+            self._data_root / seg_row["annotation.filename"]
         )
 
         with Image.open(file_path) as img:
