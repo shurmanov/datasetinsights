@@ -370,7 +370,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             if len(contour) < 3:
                 continue
             contour = np.flip(contour, axis=1)
-            segmentation = contour.ravel().tolist()
+            segmentation = contour.ravel().astype(np.uint8).tolist()
             # after padding and subtracting 1 we may get -0.5 points in our segmentation
             segmentation = [0 if i < 0 else i for i in segmentation]
             polygons.append(segmentation)
