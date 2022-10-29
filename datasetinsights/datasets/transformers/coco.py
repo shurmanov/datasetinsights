@@ -422,6 +422,8 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
                 segmentation = self._compute_segmentation(
                     ann_seg, seg_img
                 )
+                if len(segmentation) == 0:
+                    continue
 
                 # -- kpt ---
                 keypoints_vals = []
