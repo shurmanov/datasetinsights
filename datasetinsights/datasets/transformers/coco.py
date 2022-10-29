@@ -11,6 +11,8 @@ from pycocotools.mask import encode as mask_to_rle
 from pycocotools.mask import decode as decode_to_mask
 import cv2
 from skimage import measure
+from tqdm import tqdm
+
 import datasetinsights.constants as const
 from datasetinsights.datasets.transformers.base import DatasetTransformer
 from datasetinsights.datasets.unity_perception import (
@@ -397,10 +399,10 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
 
     def _annotations(self):
         annotations = []
-        for [_, row_bb], [_, row_kpt], [_, row_seg] in zip(
+        for [_, row_bb], [_, row_kpt], [_, row_seg] in tqdm(zip(
                 self._bbox_captures.iterrows(),
                 self._kpt_captures.iterrows(),
-                self._instance_segmentation_captures.iterrows()
+                self._instance_segmentation_captures.iterrows())
         ):
             image_id = uuid_to_int(row_bb["id"])
             # seg_row = self._instance_segmentation_captures.loc[
