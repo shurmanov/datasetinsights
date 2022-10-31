@@ -477,9 +477,9 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             image_id = uuid_to_int(row_bb["id"])
             seg_img_path = self._data_root / row_seg["filename"]
 
-            row_bb = pd.Series(row_bb["annotation.values"])
-            row_kpt = pd.Series(row_kpt["annotation.values"])
-            row_seg = pd.Series(row_seg["annotation.values"])
+            row_bb = pd.Series(row_bb)
+            row_kpt = pd.Series(row_kpt['annotation.values'])
+            row_seg = pd.Series(row_seg)
 
             rows_merged = pd.merge(row_bb, row_kpt, on='instance_id', how='inner')
             rows_merged = pd.merge(rows_merged, row_seg, on='instance_id', how='inner')
