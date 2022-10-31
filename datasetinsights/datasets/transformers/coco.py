@@ -475,7 +475,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             assert row_kpt.annotations[1]["id"].startswith("bounding"), "Assert failed should start with 'bounding'"
 
             image_id = uuid_to_int(row_bb["id"])
-            seg_img_path = self._data_root / row_seg["annotation.filename"]
+            seg_img_path = self._data_root / row_seg["filename"]
 
             row_bb = pd.Series(row_bb["annotation.values"])
             row_kpt = pd.Series(row_kpt["annotation.values"])
