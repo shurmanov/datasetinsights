@@ -526,7 +526,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
                 seg_ann = {
                     'rec_id': rec_id,
                     'color': seg_color,
-                    'img_path': seg_img_path,
+                    'img_path': seg_img_path.as_posix(),
                 }
                 segmentation_annotations.append(seg_ann)
                 annotations[rec_id] = record
