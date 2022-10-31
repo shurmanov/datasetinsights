@@ -468,18 +468,18 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
         annotations = {}
         segmentation_annotations = []
         for _, row_kpt in tqdm(self._kpt_captures.iterrows()):
-            data_root = Path(self._data_root)
             row_seg = row_kpt["annotations"][0]
             row_bb = row_kpt["annotations"][1]
+            row_kpt = row_kpt["annotations"][2]
             assert row_kpt.annotations[0]["id"].startswith("instance"), "Assert failed, should start with 'instance'"
             assert row_kpt.annotations[1]["id"].startswith("bounding"), "Assert failed should start with 'bounding'"
 
             image_id = uuid_to_int(row_bb["id"])
             seg_img_path = self._data_root / row_seg["filename"]
 
-            row_bb = pd.Series(row_bb)
-            row_kpt = pd.Series(row_kpt['annotation.values'])
-            row_seg = pd.Series(row_seg)
+            row_bb = pd.DataFrame(row_bb['values'])
+            row_kpt = pd.DataFrame(row_kpt['values'])
+            row_seg = pd.DataFrame(row_seg['values'])
 
             rows_merged = pd.merge(row_bb, row_kpt, on='instance_id', how='inner')
             rows_merged = pd.merge(rows_merged, row_seg, on='instance_id', how='inner')
@@ -520,7 +520,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
                     "bbox": [x, y, w, h],
                     "keypoints": keypoints_vals,
                     "num_keypoints": num_keypoints,
-                    "category_id": row["label_id"],
+                    "category_id": row["label_id_x"],
                     "id": rec_id,
                 }
                 seg_ann = {
