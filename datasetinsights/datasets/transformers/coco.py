@@ -470,9 +470,9 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
         for _, row_kpt in tqdm(self._kpt_captures.iterrows()):
             row_seg = row_kpt["annotations"][0]
             row_bb = row_kpt["annotations"][1]
-            row_kpt = row_kpt["annotations"][2]
             assert row_kpt.annotations[0]["id"].startswith("instance"), "Assert failed, should start with 'instance'"
             assert row_kpt.annotations[1]["id"].startswith("bounding"), "Assert failed should start with 'bounding'"
+            row_kpt = row_kpt["annotations"][2]
 
             image_id = uuid_to_int(row_bb["id"])
             seg_img_path = self._data_root / row_seg["filename"]
