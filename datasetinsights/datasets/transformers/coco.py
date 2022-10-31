@@ -1,11 +1,13 @@
 import hashlib
 import json
 import logging
+import multiprocessing
 import shutil
 import uuid
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from PIL import Image
 from pycocotools.mask import encode as mask_to_rle
 from pycocotools.mask import decode as decode_to_mask
@@ -23,6 +25,7 @@ from datasetinsights.datasets.unity_perception.validation import NoRecordError
 
 logger = logging.getLogger(__name__)
 
+process_pool = multiprocessing.Pool()
 
 def uuid_to_int(input_uuid):
     try:
@@ -310,7 +313,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             "info": {"description": "COCO compatible Synthetic Dataset"},
             "licences": [{"url": "", "id": 1, "name": "default"}],
             "images": self._images(),
-            "annotations": self._annotations(),
+            "annotations": self._annotations_fast(),
             "categories": self._categories(),
         }
         output_file = output / "keypoints.json"
@@ -461,6 +464,83 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
 
         return annotations
 
+    def _annotations_fast(self):
+        annotations = {}
+        segmentation_annotations = []
+        for _, row_kpt in tqdm(self._kpt_captures.iterrows()):
+            data_root = Path(self._data_root)
+            row_seg = row_kpt["annotations"][0]
+            row_bb = row_kpt["annotations"][1]
+            assert row_kpt.annotations[0]["id"].startswith("instance"), "Assert failed, should start with 'instance'"
+            assert row_kpt.annotations[1]["id"].startswith("bounding"), "Assert failed should start with 'bounding'"
+
+            image_id = uuid_to_int(row_bb["id"])
+            seg_img_path = self._data_root / row_seg["annotation.filename"]
+
+            row_bb = pd.Series(row_bb["annotation.values"])
+            row_kpt = pd.Series(row_kpt["annotation.values"])
+            row_seg = pd.Series(row_seg["annotation.values"])
+
+            rows_merged = pd.merge(row_bb, row_kpt, on='instance_id', how='inner')
+            rows_merged = pd.merge(rows_merged, row_seg, on='instance_id', how='inner')
+
+            for i, row in rows_merged.iterrows():
+                x = row['x']
+                y = row['y']
+                w = row['width']
+                h = row['height']
+                area = float(w) * float(h)
+                # segmentation = COCOKeypointsTransformer._compute_segmentation(
+                #     row, seg_img
+                # )
+                seg_color = row['color']
+                # -- kpt ---
+                keypoints_vals = []
+                num_keypoints = 0
+                for kpt in row["keypoints"]:
+                    keypoints_vals.append(
+                        [
+                            int(np.floor(kpt["x"])),
+                            int(np.floor(kpt["y"])),
+                            kpt["state"],
+                        ]
+                    )
+                    if int(kpt["state"]) != 0:
+                        num_keypoints += 1
+
+                keypoints_vals = [
+                    item for sublist in keypoints_vals for item in sublist
+                ]
+                rec_id = i
+                record = {
+                    # "segmentation": segmentation,
+                    "area": area,
+                    "iscrowd": 0,
+                    "image_id": image_id,
+                    "bbox": [x, y, w, h],
+                    "keypoints": keypoints_vals,
+                    "num_keypoints": num_keypoints,
+                    "category_id": row["label_id"],
+                    "id": rec_id,
+                }
+                seg_ann = {
+                    'rec_id': rec_id,
+                    'color': seg_color,
+                    'img_path': seg_img_path,
+                }
+                segmentation_annotations.append(seg_ann)
+                annotations[rec_id] = record
+
+        seg_annotations = process_pool.imap_unordered(compute_segmentation, segmentation_annotations, chunksize=32)
+
+        for seg_ann in seg_annotations:
+            if len(seg_ann["segs"]) == 0:
+                del annotations[seg_ann["rec_id"]]
+                continue
+            annotations["segmentation"] = seg_ann["segs"]
+
+        return annotations.values()
+
     def _categories(self):
         categories = []
         key_points = []
@@ -483,3 +563,30 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             categories.append(record)
 
         return categories
+
+
+def compute_segmentation(ann: dict):
+    seg_color = ann["color"]
+    img_path = ann["img_path"]
+
+    with Image.open(img_path) as seg_img:
+        w, h = seg_img.size
+        if np.shape(seg_img)[-1] == 4:
+            seg_img = np.array(seg_img.getdata(), dtype=np.uint8).reshape(h, w, 4)
+        else:
+            seg_img = np.array(seg_img.getdata(), dtype=np.uint8).reshape(h, w, 3)
+
+        if np.shape(seg_img)[-1] == 4:
+            seg_color = (
+                seg_color["r"],
+                seg_color["g"],
+                seg_color["b"],
+                seg_color["a"],
+            )
+        else:
+            seg_color = (seg_color["r"], seg_color["g"], seg_color["b"])
+
+        ins_mask = (seg_img == seg_color).prod(axis=-1).astype(np.uint8)
+
+    segs = COCOKeypointsTransformer._binary_mask_to_polygon(ins_mask, tolerance=10)
+    return {"rec_id": ann["rec_id"], "segs": segs}
