@@ -483,6 +483,9 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             image_id = uuid_to_int(row_bb["id"])
             seg_img_path = self._data_root / row_seg["filename"]
 
+            if len(row_bb['values'])*len(row_kpt['values'])*len(row_seg['values']) == 0:
+                continue
+
             row_bb = pd.DataFrame(row_bb['values'])
             row_kpt = pd.DataFrame(row_kpt['values'])
             row_seg = pd.DataFrame(row_seg['values'])
