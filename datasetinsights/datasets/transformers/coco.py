@@ -38,6 +38,33 @@ def uuid_to_int(input_uuid):
     return u
 
 
+def compute_segmentation(ann: dict):
+    seg_color = ann["color"]
+    img_path = ann["img_path"]
+
+    with Image.open(img_path) as seg_img:
+        w, h = seg_img.size
+        if np.shape(seg_img)[-1] == 4:
+            seg_img = np.array(seg_img.getdata(), dtype=np.uint8).reshape(h, w, 4)
+        else:
+            seg_img = np.array(seg_img.getdata(), dtype=np.uint8).reshape(h, w, 3)
+
+        if np.shape(seg_img)[-1] == 4:
+            seg_color = (
+                seg_color["r"],
+                seg_color["g"],
+                seg_color["b"],
+                seg_color["a"],
+            )
+        else:
+            seg_color = (seg_color["r"], seg_color["g"], seg_color["b"])
+
+        ins_mask = (seg_img == seg_color).prod(axis=-1).astype(np.uint8)
+
+    segs = COCOKeypointsTransformer._binary_mask_to_polygon(ins_mask, tolerance=10)
+    return {"rec_id": ann["rec_id"], "segs": segs}
+
+
 class COCOInstancesTransformer(DatasetTransformer, format="COCO-Instances"):
     """Convert Synthetic dataset to COCO format.
 
@@ -572,30 +599,3 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             categories.append(record)
 
         return categories
-
-
-def compute_segmentation(ann: dict):
-    seg_color = ann["color"]
-    img_path = ann["img_path"]
-
-    with Image.open(img_path) as seg_img:
-        w, h = seg_img.size
-        if np.shape(seg_img)[-1] == 4:
-            seg_img = np.array(seg_img.getdata(), dtype=np.uint8).reshape(h, w, 4)
-        else:
-            seg_img = np.array(seg_img.getdata(), dtype=np.uint8).reshape(h, w, 3)
-
-        if np.shape(seg_img)[-1] == 4:
-            seg_color = (
-                seg_color["r"],
-                seg_color["g"],
-                seg_color["b"],
-                seg_color["a"],
-            )
-        else:
-            seg_color = (seg_color["r"], seg_color["g"], seg_color["b"])
-
-        ins_mask = (seg_img == seg_color).prod(axis=-1).astype(np.uint8)
-
-    segs = COCOKeypointsTransformer._binary_mask_to_polygon(ins_mask, tolerance=10)
-    return {"rec_id": ann["rec_id"], "segs": segs}
