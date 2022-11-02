@@ -25,7 +25,6 @@ from datasetinsights.datasets.unity_perception.validation import NoRecordError
 
 logger = logging.getLogger(__name__)
 
-process_pool = multiprocessing.Pool()
 
 def uuid_to_int(input_uuid):
     try:
@@ -312,6 +311,7 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             self._instance_segmentation_captures = captures.filter(
                 self._instance_segmentation_def["id"]
             )
+        self.process_pool = multiprocessing.Pool(80)
 
     def execute(self, output, **kwargs):
         """Execute COCO Transformer
@@ -494,7 +494,9 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
     def _annotations_fast(self):
         annotations = {}
         segmentation_annotations = []
+        i = 0
         for _, row_kpt in tqdm(self._kpt_captures.iterrows()):
+            image_id = uuid_to_int(row_kpt["id"])
             row_bb, row_seg = None, None
             rw_kpt = None
             for r in row_kpt['annotations']:
@@ -507,7 +509,6 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
 
             row_kpt = rw_kpt
 
-            image_id = uuid_to_int(row_bb["id"])
             seg_img_path = self._data_root / row_seg["filename"]
 
             if len(row_bb['values'])*len(row_kpt['values'])*len(row_seg['values']) == 0:
@@ -520,7 +521,8 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
             rows_merged = pd.merge(row_bb, row_kpt, on='instance_id', how='inner')
             rows_merged = pd.merge(rows_merged, row_seg, on='instance_id', how='inner')
 
-            for i, row in rows_merged.iterrows():
+            rows_len = len(rows_merged)
+            for _, row in rows_merged.iterrows():
                 x = row['x']
                 y = row['y']
                 w = row['width']
@@ -547,7 +549,6 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
                 keypoints_vals = [
                     item for sublist in keypoints_vals for item in sublist
                 ]
-                rec_id = i
                 record = {
                     # "segmentation": segmentation,
                     "area": area,
@@ -557,25 +558,26 @@ class COCOKeypointsTransformer(DatasetTransformer, format="COCO-Keypoints"):
                     "keypoints": keypoints_vals,
                     "num_keypoints": num_keypoints,
                     "category_id": row["label_id_x"],
-                    "id": rec_id,
+                    "id": i,
                 }
                 seg_ann = {
-                    'rec_id': rec_id,
+                    'rec_id': i,
                     'color': seg_color,
                     'img_path': seg_img_path.as_posix(),
                 }
                 segmentation_annotations.append(seg_ann)
-                annotations[rec_id] = record
+                annotations[i] = record
+                i += 1
 
-        seg_annotations = process_pool.imap_unordered(compute_segmentation, segmentation_annotations, chunksize=32)
+        seg_annotations = self.process_pool.imap(compute_segmentation, segmentation_annotations, chunksize=50)
 
-        for seg_ann in seg_annotations:
+        for seg_ann in tqdm(seg_annotations):
             if len(seg_ann["segs"]) == 0:
                 del annotations[seg_ann["rec_id"]]
                 continue
-            annotations["segmentation"] = seg_ann["segs"]
-
-        return annotations.values()
+            annotations[seg_ann["rec_id"]]["segmentation"] = seg_ann["segs"]
+        self.process_pool.close()
+        return list(annotations.values())
 
     def _categories(self):
         categories = []
